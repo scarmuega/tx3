@@ -1444,26 +1444,22 @@ mod tests {
         let _ = parse_string("tx swap() {}").unwrap();
     }
 
-    #[test]
-    fn test_concat_parsing() {
-        let program = parse_string(r#"
-            tx test() {
-                output {
-                    to: concat("hello", "world"),
-                }
-            }
-        "#).unwrap();
-        
-        assert_eq!(program.txs.len(), 1);
-        let tx = &program.txs[0];
-        assert_eq!(tx.outputs.len(), 1);
-        
-        let output = &tx.outputs[0];
-        let to_field = output.fields.iter().find(|f| matches!(f, ast::OutputBlockField::To(_))).unwrap();
-        if let ast::OutputBlockField::To(expr) = to_field {
-            assert!(matches!(expr.as_ref(), ast::DataExpr::ConcatOp(_)));
+    input_to_ast_check!(
+        ast::ConcatOp,
+        "basic",
+        r#"concat("hello", "world")"#,
+        ast::ConcatOp {
+            lhs: Box::new(ast::DataExpr::String(ast::StringLiteral {
+                value: "hello".to_string(),
+                span: ast::Span::DUMMY,
+            })),
+            rhs: Box::new(ast::DataExpr::String(ast::StringLiteral {
+                value: "world".to_string(),
+                span: ast::Span::DUMMY,
+            })),
+            span: ast::Span::DUMMY,
         }
-    }
+    );
 
     macro_rules! input_to_ast_check {
         ($ast:ty, $name:expr, $input:expr, $expected:expr) => {
