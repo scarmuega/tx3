@@ -881,6 +881,28 @@ impl AstNode for AnyAssetConstructor {
     }
 }
 
+impl AstNode for ConcatOp {
+    const RULE: Rule = Rule::concat_constructor;
+
+    fn parse(pair: Pair<Rule>) -> Result<Self, Error> {
+        let span = pair.as_span().into();
+        let mut inner = pair.into_inner();
+
+        let lhs = DataExpr::parse(inner.next().unwrap())?;
+        let rhs = DataExpr::parse(inner.next().unwrap())?;
+
+        Ok(ConcatOp {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            span,
+        })
+    }
+
+    fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
 impl AstNode for RecordConstructorField {
     const RULE: Rule = Rule::record_constructor_field;
 
@@ -1076,6 +1098,10 @@ impl DataExpr {
         )?))
     }
 
+    fn concat_constructor_parse(pair: Pair<Rule>) -> Result<Self, Error> {
+        Ok(DataExpr::ConcatOp(ConcatOp::parse(pair)?))
+    }
+
     fn negate_op_parse(pair: Pair<Rule>, right: DataExpr) -> Result<Self, Error> {
         Ok(DataExpr::NegateOp(NegateOp {
             operand: Box::new(right),
@@ -1140,8 +1166,9 @@ impl AstNode for DataExpr {
                 Rule::unit => Ok(DataExpr::Unit),
                 Rule::identifier => DataExpr::identifier_parse(x),
                 Rule::utxo_ref => DataExpr::utxo_ref_parse(x),
-                Rule::static_asset_constructor => DataExpr::static_asset_constructor_parse(x),
-                Rule::any_asset_constructor => DataExpr::any_asset_constructor_parse(x),
+                            Rule::static_asset_constructor => DataExpr::static_asset_constructor_parse(x),
+            Rule::any_asset_constructor => DataExpr::any_asset_constructor_parse(x),
+            Rule::concat_constructor => DataExpr::concat_constructor_parse(x),
                 Rule::data_expr => DataExpr::parse(x),
                 x => unreachable!("unexpected rule as data primary: {:?}", x),
             })
@@ -1176,6 +1203,7 @@ impl AstNode for DataExpr {
             DataExpr::Identifier(x) => x.span(),
             DataExpr::AddOp(x) => &x.span,
             DataExpr::SubOp(x) => &x.span,
+            DataExpr::ConcatOp(x) => &x.span,
             DataExpr::NegateOp(x) => &x.span,
             DataExpr::PropertyOp(x) => &x.span,
             DataExpr::UtxoRef(x) => x.span(),
@@ -1406,6 +1434,7 @@ pub fn parse_well_known_example(example: &str) -> Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast;
     use assert_json_diff::assert_json_eq;
     use paste::paste;
     use pest::Parser;
@@ -1413,6 +1442,27 @@ mod tests {
     #[test]
     fn smoke_test_parse_string() {
         let _ = parse_string("tx swap() {}").unwrap();
+    }
+
+    #[test]
+    fn test_concat_parsing() {
+        let program = parse_string(r#"
+            tx test() {
+                output {
+                    to: concat("hello", "world"),
+                }
+            }
+        "#).unwrap();
+        
+        assert_eq!(program.txs.len(), 1);
+        let tx = &program.txs[0];
+        assert_eq!(tx.outputs.len(), 1);
+        
+        let output = &tx.outputs[0];
+        let to_field = output.fields.iter().find(|f| matches!(f, ast::OutputBlockField::To(_))).unwrap();
+        if let ast::OutputBlockField::To(expr) = to_field {
+            assert!(matches!(expr.as_ref(), ast::DataExpr::ConcatOp(_)));
+        }
     }
 
     macro_rules! input_to_ast_check {
